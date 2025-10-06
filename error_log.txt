@@ -1,0 +1,44 @@
+/home/mike/anaconda3/envs/diffdock/lib/python3.9/site-packages/prody/utilities/misctools.py:424: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/home/mike/anaconda3/envs/diffdock/lib/python3.9/site-packages/Bio/pairwise2.py:278: BiopythonDeprecationWarning: Bio.pairwise2 has been deprecated, and we intend to remove it in a future release of Biopython. As an alternative, please consider using Bio.Align.PairwiseAligner as a replacement, and contact the Biopython developers if you still need the Bio.pairwise2 module.
+  warnings.warn(
+/home/mike/anaconda3/envs/diffdock/lib/python3.9/site-packages/torch_geometric/nn/data_parallel.py:60: UserWarning: 'DataParallel' is usually much slower than 'DistributedDataParallel' even on a single machine. Please consider switching to 'DistributedDataParallel' for multi-GPU training.
+  warnings.warn("'DataParallel' is usually much slower than "
+loading ligands from memory:  data/cache/MOAD12_limit10_INDEXtrain_maxLigSizeNone_H0_matching/ligands.pkl
+Kept 10 ligands in None out of 10
+removed 0 ligands below minimum size out of 10
+Loading 7 receptors to keep 7.
+prot path: data/cache/MOAD12_limit10_INDEXtrain_recRad30_recMax10_esmEmbeddings_knnOnly/receptors0.pkl
+Kept 6 receptors out of 7 total and recovered 6
+removed 2 ligands with no receptor out of 10
+Number of complexes:  2
+radius protein: mean 26.48948097229004, std 3.4388980865478516, max 29.92837905883789
+radius molecule: mean 6.477636337280273, std 4.062186241149902, max 10.539822578430176
+distance protein-mol: mean 15.356512069702148, std 0.8964314460754395, max 16.25294303894043
+rmsd matching: mean 0.0, std 0.0, max 0
+random coordinates: mean -1.0, std 0.0, max -1
+random rmsd matching: mean -1.0, std 0.0, max -1
+loading ligands from memory:  data/cache/MOAD12_limit10_INDEXval_maxLigSizeNone_H0_matching/ligands.pkl
+Kept 0 ligands in None out of 0
+removed 0 ligands below minimum size out of 0
+Loading 10 receptors to keep 0.
+prot path: data/cache/MOAD12_limit10_INDEXval_recRad30_recMax10_esmEmbeddings_knnOnly/receptors0.pkl
+Kept 0 receptors out of 10 total and recovered 5
+removed 0 ligands with no receptor out of 0
+Number of complexes:  0
+radius protein: no data available
+radius molecule: no data available
+distance protein-mol: no data available
+rmsd matching: no data available
+random coordinates: no data available
+random rmsd matching: mean -1.0, std 0.0, max -1
+No scheduler
+Model with 183810 parameters
+Starting training...
+Run name:  debug_errors
+  0%|          | 0/1 [00:00<?, ?it/s]100%|██████████| 1/1 [00:01<00:00,  1.75s/it]100%|██████████| 1/1 [00:01<00:00,  1.75s/it]
+Epoch 0: Training loss 4.8977  tr 2.9176   rot 0.8301   tor 1.1501   sc 0.8350  lr 0.0010
+0it [00:00, ?it/s]0it [00:00, ?it/s]
+Epoch 0: Validation loss 0.0000  tr 0.0000   rot 0.0000   tor 0.0000   sc 0.0000
+Best Validation Loss 0.0 on Epoch 0
+Best inference metric 0 on Epoch 0

@@ -392,7 +392,8 @@ class CGModel(torch.nn.Module):
 
         if self.scale_by_sigma:
             tr_pred = tr_pred / tr_sigma.unsqueeze(1)
-            rot_pred = rot_pred * so3.score_norm(rot_sigma.cpu()).unsqueeze(1).to(data['ligand'].x.device)
+            rot_norm_factor = so3.score_norm(rot_sigma.cpu()).to(rot_sigma.device).unsqueeze(1)
+            rot_pred = rot_pred * rot_norm_factor
 
         # predict sidechain orientation
         sidechain_pred = None
@@ -419,8 +420,11 @@ class CGModel(torch.nn.Module):
         edge_sigma = tor_sigma[data['ligand'].batch][data['ligand', 'ligand'].edge_index[0]][data['ligand'].edge_mask]
 
         if self.scale_by_sigma:
-            tor_pred = tor_pred * torch.sqrt(torch.tensor(torus.score_norm(edge_sigma.cpu().numpy())).float()
-                                             .to(data['ligand'].x.device))
+            # Keep sigma computation on same device
+            edge_sigma_cpu = edge_sigma.cpu().numpy()
+            score_norms = torus.score_norm(edge_sigma_cpu)
+            scale_factor = torch.sqrt(torch.tensor(score_norms, device=edge_sigma.device).float())
+            tor_pred = tor_pred * scale_factor
         return tr_pred, rot_pred, tor_pred, sidechain_pred
 
     def torsional_forward(self, data):
@@ -452,8 +456,11 @@ class CGModel(torch.nn.Module):
         edge_sigma = tor_sigma[data['ligand'].batch][data['ligand', 'ligand'].edge_index[0]][data['ligand'].edge_mask]
 
         if self.scale_by_sigma:
-            tor_pred = tor_pred * torch.sqrt(torch.tensor(torus.score_norm(edge_sigma.cpu().numpy())).float()
-                                             .to(data['ligand'].x.device))
+            # Keep sigma computation on same device
+            edge_sigma_cpu = edge_sigma.cpu().numpy()
+            score_norms = torus.score_norm(edge_sigma_cpu)
+            scale_factor = torch.sqrt(torch.tensor(score_norms, device=edge_sigma.device).float())
+            tor_pred = tor_pred * scale_factor
         return 0, 0, tor_pred, 0
 
     def get_edge_weight(self, edge_vec, max_norm):

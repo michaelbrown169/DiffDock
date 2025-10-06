@@ -150,7 +150,9 @@ class MOAD(Dataset):
         else:
             for c in self.cluster_to_ligands.keys():
                  self.cluster_to_ligands[c] = [v for v in self.cluster_to_ligands[c] if v in self.ligands]
-            self.split_clusters = [c for c in self.split_clusters if len(self.cluster_to_ligands[c])>0]
+            # Filter split_clusters to only include clusters that exist in cluster_to_ligands
+            valid_clusters = set(self.cluster_to_ligands.keys())
+            self.split_clusters = [c for c in self.split_clusters if c in valid_clusters and len(self.cluster_to_ligands[c])>0]
 
         print_statistics(self)
         list_names = [name for cluster in self.split_clusters for name in self.cluster_to_ligands[cluster]]
@@ -342,7 +344,9 @@ class MOAD(Dataset):
         return True
 
     def collect_receptors(self, receptors_to_keep=None, max_receptor_size=None, remove_promiscuous_targets=None):
-        complex_names_all = sorted([l for c in self.split_clusters for l in self.cluster_to_ligands[c]])
+        # Filter out clusters that don't exist in cluster_to_ligands mapping
+        valid_clusters = [c for c in self.split_clusters if c in self.cluster_to_ligands]
+        complex_names_all = sorted([l for c in valid_clusters for l in self.cluster_to_ligands[c]])
         if self.limit_complexes is not None and self.limit_complexes != 0:
             complex_names_all = complex_names_all[:self.limit_complexes]
         receptor_names_all = [l[:6] for l in complex_names_all]
@@ -516,24 +520,34 @@ def print_statistics(dataset):
     receptor_sizes = []
 
     for i in range(len(dataset)):
-        complex_graph = dataset[i]
-        lig_pos = complex_graph['ligand'].pos if torch.is_tensor(complex_graph['ligand'].pos) else complex_graph['ligand'].pos[0]
-        receptor_sizes.append(complex_graph['receptor'].pos.shape[0])
-        radius_protein = torch.max(torch.linalg.vector_norm(complex_graph['receptor'].pos, dim=1))
-        molecule_center = torch.mean(lig_pos, dim=0)
-        radius_molecule = torch.max(
-            torch.linalg.vector_norm(lig_pos - molecule_center.unsqueeze(0), dim=1))
-        distance_center = torch.linalg.vector_norm(molecule_center)
-        statistics[0].append(radius_protein)
-        statistics[1].append(radius_molecule)
-        statistics[2].append(distance_center)
-        if "rmsd_matching" in complex_graph:
-            statistics[3].append(complex_graph.rmsd_matching)
-        else:
-            statistics[3].append(0)
-        statistics[4].append(int(complex_graph.random_coords) if "random_coords" in complex_graph else -1)
-        if "random_coords" in complex_graph and complex_graph.random_coords and "rmsd_matching" in complex_graph:
-            statistics[5].append(complex_graph.rmsd_matching)
+        try:
+            complex_graph = dataset[i]
+            lig_pos = complex_graph['ligand'].pos if torch.is_tensor(complex_graph['ligand'].pos) else complex_graph['ligand'].pos[0]
+            
+            # Skip if receptor or ligand positions are empty
+            if complex_graph['receptor'].pos.numel() == 0 or len(lig_pos) == 0:
+                continue
+                
+            receptor_sizes.append(complex_graph['receptor'].pos.shape[0])
+            radius_protein = torch.max(torch.linalg.vector_norm(complex_graph['receptor'].pos, dim=1))
+            molecule_center = torch.mean(lig_pos, dim=0)
+            radius_molecule = torch.max(
+                torch.linalg.vector_norm(lig_pos - molecule_center.unsqueeze(0), dim=1))
+            distance_center = torch.linalg.vector_norm(molecule_center)
+            statistics[0].append(radius_protein)
+            statistics[1].append(radius_molecule)
+            statistics[2].append(distance_center)
+            if "rmsd_matching" in complex_graph:
+                statistics[3].append(complex_graph.rmsd_matching)
+            else:
+                statistics[3].append(0)
+            statistics[4].append(int(complex_graph.random_coords) if "random_coords" in complex_graph else -1)
+            if "random_coords" in complex_graph and complex_graph.random_coords and "rmsd_matching" in complex_graph:
+                statistics[5].append(complex_graph.rmsd_matching)
+        except Exception as e:
+            # Skip complexes that cause errors in statistics calculation
+            print(f"Warning: Skipping complex {i} due to error: {e}")
+            continue
 
     if len(statistics[5]) == 0:
         statistics[5].append(-1)
@@ -541,7 +555,10 @@ def print_statistics(dataset):
     print('Number of complexes: ', len(dataset))
     for i in range(len(name)):
         array = np.asarray(statistics[i])
-        print(f"{name[i]}: mean {np.mean(array)}, std {np.std(array)}, max {np.max(array)}")
+        if len(array) > 0:
+            print(f"{name[i]}: mean {np.mean(array)}, std {np.std(array)}, max {np.max(array)}")
+        else:
+            print(f"{name[i]}: no data available")
 
     return
 

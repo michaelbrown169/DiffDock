@@ -5,7 +5,11 @@ import os
 import shutil
 from functools import partial
 
-import wandb
+try:
+    import wandb
+    HAS_WANDB = True
+except ImportError:
+    HAS_WANDB = False
 import torch
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -105,7 +109,7 @@ def train(args, model, optimizer, scheduler, ema_weights, train_loader, val_load
             ema_state_dict = copy.deepcopy(model.module.state_dict() if device.type == 'cuda' else model.state_dict())
             ema_weights.restore(model.parameters())
 
-        if args.wandb:
+        if args.wandb and HAS_WANDB:
             logs.update({'train_' + k: v for k, v in train_losses.items()})
             logs.update({'val_' + k: v for k, v in val_losses.items()})
             logs['current_lr'] = optimizer.param_groups[0]['lr']
@@ -176,7 +180,7 @@ def main_function():
     if args.cudnn_benchmark:
         torch.backends.cudnn.benchmark = True
 
-    if args.wandb:
+    if args.wandb and HAS_WANDB:
         wandb.init(
             entity='',
             settings=wandb.Settings(start_method="fork"),
@@ -215,7 +219,7 @@ def main_function():
     numel = sum([p.numel() for p in model.parameters()])
     print('Model with', numel, 'parameters')
 
-    if args.wandb:
+    if args.wandb and HAS_WANDB:
         wandb.log({'numel': numel})
 
     # record parameters

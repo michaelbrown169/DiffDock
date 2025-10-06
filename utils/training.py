@@ -40,13 +40,18 @@ def loss_function(
     # translation
     tr_score = torch.cat([d.tr_score for d in data], dim=0) if device.type == 'cuda' else data.tr_score
     tr_sigma_vec = tr_sigma.unsqueeze(-1)
-    tr_loss = ((tr_pred.cpu() - tr_score) ** 2 * tr_sigma_vec ** 2).mean(dim=mean_dims)
+    if device.type == 'cuda':
+        tr_score = tr_score.to(device)
+        tr_sigma_vec = tr_sigma_vec.to(device)
+    tr_loss = ((tr_pred - tr_score) ** 2 * tr_sigma_vec ** 2).mean(dim=mean_dims)
     tr_base_loss = (tr_score ** 2 * tr_sigma_vec ** 2).mean(dim=mean_dims).detach()
 
     # rotation
     rot_score = torch.cat([d.rot_score for d in data], dim=0) if device.type == 'cuda' else data.rot_score
-    rot_score_norm = so3.score_norm(rot_sigma.cpu()).unsqueeze(-1)
-    rot_loss = (((rot_pred.cpu() - rot_score) / rot_score_norm) ** 2).mean(dim=mean_dims)
+    rot_score_norm = so3.score_norm(rot_sigma.cpu()).to(device).unsqueeze(-1)
+    if device.type == 'cuda':
+        rot_score = rot_score.to(device)
+    rot_loss = (((rot_pred - rot_score) / rot_score_norm) ** 2).mean(dim=mean_dims)
     rot_base_loss = ((rot_score / rot_score_norm) ** 2).mean(dim=mean_dims).detach()
 
     # torsion
@@ -55,26 +60,29 @@ def loss_function(
             np.concatenate([d.tor_sigma_edge for d in data] if device.type == 'cuda' else data.tor_sigma_edge)
         )
         tor_score = torch.cat([d.tor_score for d in data], dim=0) if device.type == 'cuda' else data.tor_score
-        tor_score_norm2 = torch.tensor(torus.score_norm(edge_tor_sigma.cpu().numpy())).float()
-        tor_loss = ((tor_pred.cpu() - tor_score) ** 2 / tor_score_norm2)
+        tor_score_norm2 = torch.tensor(torus.score_norm(edge_tor_sigma.cpu().numpy())).float().to(device)
+        if device.type == 'cuda':
+            edge_tor_sigma = edge_tor_sigma.to(device)
+            tor_score = tor_score.to(device)
+        tor_loss = ((tor_pred - tor_score) ** 2 / tor_score_norm2)
         tor_base_loss = ((tor_score ** 2 / tor_score_norm2)).detach()
         if apply_mean:
-            tor_loss = tor_loss.mean() * torch.ones(1, dtype=torch.float)
-            tor_base_loss = tor_base_loss.mean() * torch.ones(1, dtype=torch.float)
+            tor_loss = tor_loss.mean() * torch.ones(1, dtype=torch.float, device=device)
+            tor_base_loss = tor_base_loss.mean() * torch.ones(1, dtype=torch.float, device=device)
         else:
             index = torch.cat([torch.ones(d['ligand'].edge_mask.sum()) * i for i, d in enumerate(data)]).long() \
                 if device.type == 'cuda' else data['ligand'].batch[data['ligand', 'ligand'].edge_index[0][data['ligand'].edge_mask]]
             num_graphs = len(data) if device.type == 'cuda' else data.num_graphs
-            t_l, t_b_l, c = torch.zeros(num_graphs), torch.zeros(num_graphs), torch.zeros(num_graphs)
-            c.index_add_(0, index, torch.ones(tor_loss.shape))
+            t_l, t_b_l, c = torch.zeros(num_graphs, device=device), torch.zeros(num_graphs, device=device), torch.zeros(num_graphs, device=device)
+            c.index_add_(0, index, torch.ones(tor_loss.shape, device=device))
             c = c + 1e-4
             t_l.index_add_(0, index, tor_loss)
             t_b_l.index_add_(0, index, tor_base_loss)
             tor_loss, tor_base_loss = t_l / c, t_b_l / c
     else:
-        tor_loss = torch.zeros(1, dtype=torch.float)
-        tor_base_loss = torch.zeros(1, dtype=torch.float) if apply_mean \
-            else torch.zeros(len(rot_loss), dtype=torch.float)
+        tor_loss = torch.zeros(1, dtype=torch.float, device=device)
+        tor_base_loss = torch.zeros(1, dtype=torch.float, device=device) if apply_mean \
+            else torch.zeros(len(rot_loss), dtype=torch.float, device=device)
 
     # stock DiffDock weighted loss
     loss = tr_loss * tr_weight + rot_loss * rot_weight + tor_loss * tor_weight
@@ -118,7 +126,10 @@ class AverageMeter():
 
     def summary(self):
         if self.intervals == 1:
-            out = {k: v.item() / self.count for k, v in self.acc.items()}
+            if self.count > 0:
+                out = {k: v.item() / self.count for k, v in self.acc.items()}
+            else:
+                out = {k: 0.0 for k, v in self.acc.items()}
             return out
         else:
             out = {}
@@ -142,7 +153,7 @@ def train_epoch(model, loader, optimizer, device, t_to_sigma, loss_fn, ema_weigh
         data = [d.to(device) for d in data] if device.type == 'cuda' else data
         try:
             tr_pred, rot_pred, tor_pred, sidechain_pred = model(data)
-            loss_tuple = loss_fn(tr_pred, rot_pred, tor_pred, sidechain_pred, data=data, t_to_sigma=t_to_sigma, device=device)
+            loss_tuple = loss_fn(tr_pred, rot_pred, tor_pred, data, t_to_sigma=t_to_sigma, device=device)
             if loss_tuple is None:
                 print("None loss tuple, skipping")
                 continue
@@ -196,7 +207,7 @@ def test_epoch(model, loader, device, t_to_sigma, loss_fn, test_sigma_intervals=
         try:
             with torch.no_grad():
                 tr_pred, rot_pred, tor_pred, sidechain_pred = model(data)
-            loss_tuple = loss_fn(tr_pred, rot_pred, tor_pred, sidechain_pred, data=data, t_to_sigma=t_to_sigma, apply_mean=False, device=device)
+            loss_tuple = loss_fn(tr_pred, rot_pred, tor_pred, data, t_to_sigma=t_to_sigma, apply_mean=False, device=device)
             if loss_tuple is None: continue
             meter.add([loss_tuple[0].cpu().detach(), *loss_tuple[1:]])
 

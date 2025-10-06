@@ -12,5 +12,15 @@ args = parser.parse_args()
 
 dict = {}
 for filename in tqdm(os.listdir(args.esm_embeddings_path)):
-    dict[filename.split('.')[0]] = torch.load(os.path.join(args.esm_embeddings_path,filename))['representations'][33]
-torch.save(dict,args.output_path)
+    if filename.endswith('.pt'):
+        # Get numeric ID from filename
+        parts = filename.split()
+        if len(parts) >= 2:
+            id_str = parts[0]
+        else:
+            id_str = filename.split('.')[0]
+        
+        # Load and extract embeddings
+        result = torch.load(os.path.join(args.esm_embeddings_path, filename))
+        dict[id_str] = result['representations'][33]
+torch.save(dict, args.output_path)
