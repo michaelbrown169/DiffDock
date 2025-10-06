@@ -3,6 +3,8 @@ import functools
 import math
 import os
 import shutil
+import pickle
+from pathlib import Path
 from functools import partial
 
 try:
@@ -20,9 +22,106 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (64000, rlimit[1]))
 import yaml
 from utils.diffusion_utils import t_to_sigma as t_to_sigma_compl, t_to_sigma_individual
 from datasets.loader import construct_loader
+from datasets.moad import MOAD
 from utils.parsing import parse_train_args
 from utils.training import train_epoch, test_epoch, loss_function, inference_epoch_fix
 from utils.utils import save_yaml_file, get_optimizer_and_scheduler, get_model, ExponentialMovingAverage
+
+
+def create_moad_whitelist_if_needed(args):
+    """Create MOAD whitelist if it doesn't exist and dataset is MOAD"""
+    if args.dataset != 'moad':
+        return None
+        
+    whitelist_path = "data/moad_targeted_whitelist.pkl"
+    
+    # Check if whitelist already exists
+    if os.path.exists(whitelist_path):
+        print(f"✅ Loading existing whitelist: {whitelist_path}")
+        with open(whitelist_path, 'rb') as f:
+            whitelist_data = pickle.load(f)
+            if isinstance(whitelist_data, dict) and 'valid_complexes' in whitelist_data:
+                return set(whitelist_data['valid_complexes'])
+            else:
+                return set(whitelist_data)
+    
+    # Create whitelist if it doesn't exist
+    print("🔄 Creating MOAD whitelist...")
+    
+    moad_dir = getattr(args, 'moad_dir', 'data/BindingMOAD_2020_ab_processed_biounit/')
+    ligand_dir = os.path.join(moad_dir, 'pdb_superligand')
+    protein_dir = os.path.join(moad_dir, 'pdb_protein')
+    
+    if not os.path.exists(ligand_dir) or not os.path.exists(protein_dir):
+        print(f"⚠️  MOAD directories not found: {moad_dir}")
+        return None
+    
+    # Get all ligand files
+    ligand_files = list(Path(ligand_dir).glob('*.pdb'))
+    print(f"Found {len(ligand_files)} ligand files to check")
+    
+    valid_complexes = set()
+    
+    # Group ligands by protein to reduce redundant protein file checks
+    protein_to_ligands = {}
+    for ligand_file in ligand_files:
+        complex_name = ligand_file.stem
+        # Extract protein ID from complex name (e.g., "10gs_1_superlig_0" -> "10gs_1")
+        parts = complex_name.split('_')
+        if len(parts) >= 4:  # Should be: pdb_id, chain_id, "superlig", ligand_id
+            protein_id = f"{parts[0]}_{parts[1]}"
+            if protein_id not in protein_to_ligands:
+                protein_to_ligands[protein_id] = []
+            protein_to_ligands[protein_id].append(complex_name)
+    
+    # Check protein files and validate ligands
+    for protein_id, ligand_list in protein_to_ligands.items():
+        protein_file = os.path.join(protein_dir, f"{protein_id}_protein.pdb")
+        if os.path.exists(protein_file):
+            # If protein exists, all its ligands are valid
+            valid_complexes.update(ligand_list)
+    
+    print(f"✅ Created whitelist with {len(valid_complexes)} valid complexes")
+    
+    # Save whitelist
+    os.makedirs("data", exist_ok=True)
+    with open(whitelist_path, 'wb') as f:
+        pickle.dump(list(valid_complexes), f)
+    
+    return valid_complexes
+
+
+def setup_moad_whitelist_filtering(whitelist_set):
+    """Setup MOAD preprocessing patch for whitelist filtering"""
+    if whitelist_set is None or len(whitelist_set) == 0:
+        return lambda: None
+        
+    # Store original method
+    original_preprocessing_ligands = MOAD.preprocessing_ligands
+    
+    def whitelist_preprocessing_ligands(self):
+        # Call original preprocessing first
+        original_preprocessing_ligands(self)
+        
+        # Apply whitelist filtering
+        if hasattr(self, 'cluster_to_ligands'):
+            filtered_cluster_to_ligands = {}
+            for cluster_name, ligands in self.cluster_to_ligands.items():
+                valid_ligands = [lig for lig in ligands if lig in whitelist_set]
+                if valid_ligands:
+                    filtered_cluster_to_ligands[cluster_name] = valid_ligands
+            
+            print(f"🔄 Whitelist filtering: {len(self.cluster_to_ligands)} -> {len(filtered_cluster_to_ligands)} clusters")
+            self.cluster_to_ligands = filtered_cluster_to_ligands
+    
+    # Apply the patch
+    MOAD.preprocessing_ligands = whitelist_preprocessing_ligands
+    
+    # Return cleanup function
+    def cleanup():
+        MOAD.preprocessing_ligands = original_preprocessing_ligands
+    
+    return cleanup
 
 
 def train(args, model, optimizer, scheduler, ema_weights, train_loader, val_loader, t_to_sigma, run_dir, val_dataset2):
@@ -189,9 +288,36 @@ def main_function():
             config=args
         )
 
+    # Setup MOAD dataset enhancements for production training
+    if args.dataset == 'moad':
+        # Enable unroll_clusters for individual complex training instead of cluster-based
+        if not hasattr(args, 'unroll_clusters'):
+            args.unroll_clusters = True
+        
+        # Set reasonable multiplicity for training if not specified
+        if not hasattr(args, 'train_multiplicity') or args.train_multiplicity == 1:
+            args.train_multiplicity = 5
+        if not hasattr(args, 'val_multiplicity'):
+            args.val_multiplicity = 1
+        
+        # Set default MOAD directory to the correct path
+        args.moad_dir = "data/BindingMOAD_2020_ab_processed_biounit/"
+
+    # Setup whitelist filtering for MOAD dataset
+    whitelist_set = create_moad_whitelist_if_needed(args)
+    cleanup_whitelist = setup_moad_whitelist_filtering(whitelist_set)
+
     # construct loader
     t_to_sigma = partial(t_to_sigma_compl, args=args)
-    train_loader, val_loader, val_dataset2 = construct_loader(args, t_to_sigma, device)
+    
+    try:
+        train_loader, val_loader, val_dataset2 = construct_loader(args, t_to_sigma, device)
+        print(f"✅ Train loader batches: {len(train_loader)}")
+        print(f"✅ Val loader batches: {len(val_loader)}")
+    except Exception as e:
+        # Cleanup whitelist patch if loader construction fails
+        cleanup_whitelist()
+        raise e
     
     model = get_model(args, device, t_to_sigma=t_to_sigma)
     optimizer, scheduler = get_optimizer_and_scheduler(args, model, scheduler_mode=args.inference_earlystop_goal if args.val_inference_freq is not None else 'min')
@@ -228,7 +354,11 @@ def main_function():
     save_yaml_file(yaml_file_name, args.__dict__)
     args.device = device
 
-    train(args, model, optimizer, scheduler, ema_weights, train_loader, val_loader, t_to_sigma, run_dir, val_dataset2)
+    try:
+        train(args, model, optimizer, scheduler, ema_weights, train_loader, val_loader, t_to_sigma, run_dir, val_dataset2)
+    finally:
+        # Cleanup whitelist patch
+        cleanup_whitelist()
 
 
 if __name__ == '__main__':

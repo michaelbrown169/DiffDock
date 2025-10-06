@@ -48,6 +48,7 @@ If you use the latest version, DiffDock-L, please also cite the following paper:
   - [Quick Start](#quickstart)
   - [Setup Environment](#environment)
   - [Docking Prediction](#inference)
+  - [MOAD Training](#moad-training)
 - [FAQ](#faq)
 - [Datasets](#datasets)
 - [Replicate results](#replicate)
@@ -122,6 +123,59 @@ And you are ready to run inference:
     python -m inference --config default_inference_args.yaml  --protein_ligand_csv data/protein_ligand_example.csv --out_dir results/user_predictions_small 
 
 When providing the `.pdb` files you can run DiffDock also on CPU, however, if possible, we recommend using a GPU as the model runs significantly faster. Note that the first time you run DiffDock on a device the program will precompute and store in cache look-up tables for SO(2) and SO(3) distributions (typically takes a couple of minutes), this won't be repeated in following runs.  
+
+## MOAD Training  <a name="moad-training"></a>
+
+You can train DiffDock on the BindingMOAD dataset using the integrated training system. The training script automatically handles dataset preprocessing, whitelist creation, and efficient sampling.
+
+### Prerequisites
+
+1. **Download BindingMOAD dataset**: Follow the [Datasets](#datasets) section to download and place the BindingMOAD_2020_processed data in `data/BindingMOAD_2020_processed/`
+
+2. **Generate ESM2 embeddings**: Create the necessary ESM2 embeddings for MOAD proteins:
+   ```bash
+   python datasets/esm_embedding_preparation.py --dataset moad --data_dir data/BindingMOAD_2020_processed/pdb_protein/
+   ```
+   
+   Then use the ESM repository to generate embeddings and process them as described in [Replicate results](#replicate).
+
+### Training Commands
+
+**Quick test training (1K complexes, 2 epochs):**
+```bash
+python train.py --dataset moad --limit_complexes 1000 --n_epochs 2 --batch_size 16 --run_name "moad_test"
+```
+
+**Medium-scale training (10K complexes):**
+```bash
+python train.py --dataset moad --limit_complexes 10000 --n_epochs 5 --batch_size 32 --run_name "moad_medium"
+```
+
+**Full-scale production training:**
+```bash
+python train.py --dataset moad --limit_complexes 50000 --n_epochs 10 --batch_size 64 --run_name "moad_full"
+```
+
+### Key Features
+
+- **Automatic whitelist creation**: The system automatically creates a whitelist of valid complexes on first run
+- **Efficient sampling**: Uses `unroll_clusters=True` for individual complex sampling instead of cluster-based sampling
+- **Production optimizations**: Includes train multiplicity, progress tracking, and memory-efficient loading
+- **Integrated preprocessing**: All dataset filtering and validation is handled automatically
+
+### Training Arguments
+
+Key arguments for MOAD training:
+- `--dataset moad`: Use BindingMOAD dataset
+- `--limit_complexes N`: Limit to N complexes (default: all ~32K)
+- `--batch_size N`: Training batch size
+- `--n_epochs N`: Number of training epochs
+- `--run_name "name"`: Name for this training run
+- `--moad_dir path`: Path to MOAD dataset (default: `data/BindingMOAD_2020_ab_processed_biounit/`)
+- `--moad_esm_embeddings_path path`: Path to ESM embeddings file
+- `--moad_esm_embeddings_sequences_path path`: Path to ESM sequences file
+
+The training script will automatically handle whitelist creation, dataset preprocessing, and efficient loading of the ~32K complexes available in BindingMOAD.
 
 ## Graphical UI  <a name="gui"></a>
 
